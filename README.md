@@ -10,15 +10,17 @@ API (.NET en modo demo) y SQL Server, todo **aislado** del stack productivo.
 |---------|-------------|
 | `docker-compose.yml` | Stack demo (db + api + frontend), parametrizado por `.env` |
 | `.env.example` | Plantilla de variables (secretos + dominio) |
-| `nginx/demo.conf` | Reverse proxy del host (subdominios frontend/api + TLS) |
+| `nginx/demo.conf` | Reverse proxy del host (un dominio, ruteo por path + TLS) |
 
 ## Requisitos
 
 - Docker Engine + Compose.
 - nginx en el host (para el reverse proxy) y `certbot` (para HTTPS).
-- Un **dominio** con 2 registros DNS **A** apuntando a la IP del VPS:
-  - `demo.tudominio.com` (frontend)
-  - `api-demo.tudominio.com` (API)
+- Un **dominio** con un registro DNS **A** apuntando a la IP del VPS.
+  - Ej (DuckDNS gratis): `futbol-complejo-demo.duckdns.org` -> IP del VPS.
+
+El frontend y la API se sirven bajo el **mismo dominio**, ruteando por path:
+`/` -> frontend · `/api/` -> API. Asi hay un solo certificado TLS y no hay CORS cross-origin.
 
 ## Layout esperado
 
@@ -45,18 +47,18 @@ cp .env.example .env
 nano .env
 #   DB_SA_PASSWORD=...        (min 8, complejidad)
 #   JWT_KEY=...               (openssl rand -base64 48)
-#   DEMO_WEB_ORIGIN=https://demo.tudominio.com
-#   DEMO_API_URL=https://api-demo.tudominio.com/api/v1
+#   DEMO_WEB_ORIGIN=https://futbol-complejo-demo.duckdns.org
+#   DEMO_API_URL=https://futbol-complejo-demo.duckdns.org/api/v1
 
 # 3. Levantar el stack demo (construye imagenes)
 docker compose --env-file .env up -d --build
 
 # 4. Reverse proxy + HTTPS (en el host)
 sudo cp nginx/demo.conf /etc/nginx/sites-available/futbol-demo.conf
-sudo nano /etc/nginx/sites-available/futbol-demo.conf   # reemplazar tudominio.com
+sudo nano /etc/nginx/sites-available/futbol-demo.conf   # confirmar el dominio
 sudo ln -s /etc/nginx/sites-available/futbol-demo.conf /etc/nginx/sites-enabled/
 sudo nginx -t && sudo systemctl reload nginx
-sudo certbot --nginx -d demo.tudominio.com -d api-demo.tudominio.com
+sudo certbot --nginx -d futbol-complejo-demo.duckdns.org
 ```
 
 ## Verificacion
@@ -64,8 +66,8 @@ sudo certbot --nginx -d demo.tudominio.com -d api-demo.tudominio.com
 ```bash
 docker compose --env-file .env ps          # db y api "healthy"; frontend Up
 docker compose --env-file .env logs -f api-demo
-curl -I https://demo.tudominio.com
-curl -I https://api-demo.tudominio.com/api/v1/roles   # 401 (sin token) OK
+curl -I https://futbol-complejo-demo.duckdns.org
+curl -I https://futbol-complejo-demo.duckdns.org/api/v1/roles   # 401 (sin token) OK
 ```
 
 ## Credenciales demo
