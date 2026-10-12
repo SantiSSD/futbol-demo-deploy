@@ -1,0 +1,11 @@
+# Secretos / configuracion local
+.env
+
+# Repos de la app si se clonan DENTRO de este repo (no recomendado; usar hermanos)
+app/
+web/
+
+# Ruido
+*.log
+.DS_Store
+Thumbs.db

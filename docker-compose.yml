@@ -1,0 +1,92 @@
+# ============================================================
+# Stack DEMO (frontend + api + sql server) - despliegue de la demo publica
+#
+# Levanta las TRES piezas como UN solo proyecto Compose ("futbol-demo"):
+#   - db-demo        : SQL Server (base y volumen PROPIOS de la demo)
+#   - api-demo       : backend .NET en modo demo (wipe + re-seed atomico auto)
+#   - frontend-demo  : React compilado servido por nginx (con panel de credenciales demo)
+#
+# Aislamiento: NO comparte base, volumen ni puertos con el stack productivo.
+# Los puertos quedan atados a 127.0.0.1 -> solo el reverse proxy del host (nginx)
+# los alcanza; la demo se expone publicamente por HTTPS a traves de ese proxy.
+#
+# Layout esperado en el servidor (y en local): este repo de deploy vive AL LADO
+# de los dos repos de la aplicacion, con estos nombres exactos:
+#   futbol-demo-deploy/
+#   FutbolComplejoAPI/          (backend)
+#   Frontend_FutbolComplejo/    (frontend)
+#
+# Uso:
+#   Copy-Item .env.example .env    # completar secretos + dominio
+#   docker compose --env-file .env up -d --build
+# ============================================================
+
+name: futbol-demo
+
+services:
+  # ---------- SQL Server (demo) ----------
+  db-demo:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: futbolcomplejo-demo-db
+    restart: unless-stopped
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "${DB_SA_PASSWORD:?Defini DB_SA_PASSWORD en .env}"
+      MSSQL_PID: "Developer"
+    volumes:
+      - db-demo-data:/var/opt/mssql
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -C -Q 'SELECT 1' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  # ---------- Backend API (demo) ----------
+  api-demo:
+    build:
+      context: ${BACKEND_PATH:-../FutbolComplejoAPI}
+      dockerfile: Dockerfile
+    container_name: futbolcomplejo-demo-api
+    restart: unless-stopped
+    depends_on:
+      db-demo:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__DefaultConnection: "Server=db-demo;Database=FutbolComplejoDemo;User Id=sa;Password=${DB_SA_PASSWORD:?Defini DB_SA_PASSWORD en .env};TrustServerCertificate=True;Encrypt=False"
+      Jwt__Key: "${JWT_KEY:?Defini JWT_KEY (min 32 chars) en .env}"
+      Jwt__Issuer: "FutbolComplejoAPI"
+      Jwt__Audience: "FutbolComplejoAPI"
+      # Modo demo habilitado (guardias completas + intervalos validos; fail-fast en Program.cs).
+      Demo__Enabled: "true"
+      Demo__AllowDestructiveReset: "true"
+      Demo__ExpectedDatabase: "FutbolComplejoDemo"
+      Demo__ResetIntervalHours: "6"
+      Demo__ManualResetCooldownSeconds: "900"
+      # CORS: origen publico del frontend demo (con esquema https).
+      Cors__AllowedOrigins__0: "${DEMO_WEB_ORIGIN:?Defini DEMO_WEB_ORIGIN en .env}"
+      Venue__TimeZoneId: "America/Argentina/Buenos_Aires"
+    ports:
+      # Solo accesible desde el host (el proxy nginx hace el reverse proxy).
+      - "127.0.0.1:5001:8080"
+
+  # ---------- Frontend (demo) ----------
+  frontend-demo:
+    build:
+      context: ${FRONTEND_PATH:-../Frontend_FutbolComplejo}
+      dockerfile: Dockerfile
+      args:
+        # Vite inlina estas variables en BUILD time.
+        VITE_API_URL: "${DEMO_API_URL:?Defini DEMO_API_URL en .env}"
+        VITE_DEMO_MODE: "true"
+    container_name: futbolcomplejo-demo-frontend
+    restart: unless-stopped
+    depends_on:
+      - api-demo
+    ports:
+      # Solo accesible desde el host (el proxy nginx hace el reverse proxy).
+      - "127.0.0.1:5173:80"
+
+volumes:
+  db-demo-data:
